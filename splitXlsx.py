@@ -1,80 +1,134 @@
 import pandas as pd
 import os
-from tkinter import Tk, filedialog
-import shutil
+import tkinter as tk
+from tkinter import filedialog, messagebox
+import subprocess
 
-def select_input_file():
-    root = Tk()
-    root.withdraw()  # 隐藏主窗口
-    file_path = filedialog.askopenfilename(
-        title="选择要处理的 Excel 文件",
-        filetypes=[("Excel files", "*.xlsx *.xls")]
-    )
-    return file_path
+class ExcelSplitterApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Excel 文件按年级班级拆分")
+        self.root.geometry("500x350")  # Set window size
 
-def select_output_directory():
-    root = Tk()
-    root.withdraw()
-    directory = filedialog.askdirectory(
-       title="选择要保存文件的文件夹" 
-    )
-    return directory
+        # Variables
+        self.input_file = tk.StringVar()
+        self.output_dir = tk.StringVar()
+        
+        # Set default output directory (optional, user can change)
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        self.output_dir.set(os.path.join(script_dir, "OutFiles"))
 
-def create_grade_class_folders(input_file, output_dir):
-    try:
-        # 读取 Excel 文件
-        df = pd.read_excel(input_file)
+        # GUI Elements
+        # Input file selection
+        tk.Label(root, text="输入 Excel 文件:").grid(row=0, column=0, padx=10, pady=10, sticky="w")
+        tk.Entry(root, textvariable=self.input_file, width=40).grid(row=0, column=1, padx=10, pady=10)
+        tk.Button(root, text="浏览", command=self.browse_input_file).grid(row=0, column=2, padx=10, pady=10)
+
+        # Output folder selection
+        tk.Label(root, text="输出文件夹:").grid(row=1, column=0, padx=10, pady=10, sticky="w")
+        tk.Entry(root, textvariable=self.output_dir, width=40).grid(row=1, column=1, padx=10, pady=10)
+        tk.Button(root, text="浏览", command=self.browse_output_folder).grid(row=1, column=2, padx=10, pady=10)
         
-        # 确保存在年级和班级列
-        if '年级' not in df.columns or '班级' not in df.columns:
-            raise ValueError("Excel 文件必须包含 '年级' 和 '班级' 列")
+        # Process button
+        tk.Button(root, text="开始处理", command=self.process_excel).grid(row=2, column=1, pady=20)
         
-        # 获取所有年级
-        grades = df['年级'].unique()
+        # Open output folder button
+        tk.Button(root, text="打开输出文件夹", command=self.open_output_folder).grid(row=3, column=1, pady=10)
         
-        # 遍历每个年级
-        for grade in grades:
-            # 创建年级文件夹
-            grade_folder = os.path.join(output_dir, str(grade))
-            os.makedirs(grade_folder, exist_ok=True)
+        # Status label
+        self.status_label = tk.Label(root, text="请先选择输入文件和输出文件夹", wraplength=400)
+        self.status_label.grid(row=4, column=0, columnspan=3, padx=10, pady=10)
+
+    def browse_input_file(self):
+        file_path = filedialog.askopenfilename(
+            title="选择要处理的 Excel 文件",
+            filetypes=[("Excel files", "*.xlsx *.xls")]
+        )
+        if file_path:
+            self.input_file.set(file_path)
+            self.status_label.config(text="已选择输入文件: " + file_path)
+
+    def browse_output_folder(self):
+        folder_path = filedialog.askdirectory(
+            title="选择输出文件夹"
+        )
+        if folder_path:
+            self.output_dir.set(folder_path)
+            self.status_label.config(text="已选择输出文件夹: " + folder_path)
+
+    def process_excel(self):
+        input_file = self.input_file.get()
+        output_dir = self.output_dir.get()
+        
+        if not input_file:
+            messagebox.showerror("错误", "请先选择一个 Excel 文件！")
+            self.status_label.config(text="错误：未选择输入文件")
+            return
+        
+        if not output_dir:
+            messagebox.showerror("错误", "请先选择输出文件夹！")
+            self.status_label.config(text="错误：未选择输出文件夹")
+            return
+        
+        try:
+            # Read Excel file
+            df = pd.read_excel(input_file, engine='openpyxl')
             
-            # 获取该年级的所有班级
-            grade_df = df[df['年级'] == grade]
-            classes = grade_df['班级'].unique()
+            # Clean data
+            df['年级'] = df['年级'].astype(str).str.strip()
+            df['班级'] = df['班级'].astype(str).str.strip()
             
-            # 遍历每个班级
-            for class_name in classes:
-                # 获取该班级的数据
-                class_df = grade_df[grade_df['班级'] == class_name]
+            # Print debugging info to console
+            print("读取的数据行数:", len(df))
+            print("所有年级:", df['年级'].unique())
+            
+            # Check for required columns
+            if '年级' not in df.columns or '班级' not in df.columns:
+                raise ValueError("Excel 文件必须包含 '年级' 和 '班级' 列")
+            
+            # Create output directory
+            os.makedirs(output_dir, exist_ok=True)
+            
+            # Process each grade
+            grades = df['年级'].unique()
+            for grade in grades:
+                print(f"处理年级: {grade}")
+                grade_folder = os.path.join(output_dir, str(grade))
+                os.makedirs(grade_folder, exist_ok=True)
                 
-                # 创建输出文件路径
-                output_file = os.path.join(grade_folder, f"{grade}{class_name}.xlsx")
+                # Process each class in the grade
+                grade_df = df[df['年级'] == grade]
+                classes = grade_df['班级'].unique()
+                print(f"该年级班级: {classes}")
                 
-                # 保存到新的 Excel 文件
-                class_df.to_excel(output_file, index=False)
-                
-        print(f"处理完成！文件已保存至 {output_dir}")
-        
-    except Exception as e:
-        print(f"处理过程中发生错误: {str(e)}")
+                for class_name in classes:
+                    print(f"生成文件: {grade}_{class_name}.xlsx")
+                    class_df = grade_df[grade_df['班级'] == class_name]
+                    output_file = os.path.join(grade_folder, f"{grade}_{class_name}.xlsx")
+                    class_df.to_excel(output_file, index=False, engine='openpyxl')
+            
+            self.status_label.config(text=f"处理完成！文件已保存至 {output_dir}")
+            messagebox.showinfo("成功", f"处理完成！文件已保存至 {output_dir}")
+            
+        except Exception as e:
+            error_msg = f"处理过程中发生错误: {str(e)}"
+            print(error_msg)
+            self.status_label.config(text=error_msg)
+            messagebox.showerror("错误", error_msg)
+
+    def open_output_folder(self):
+        output_dir = self.output_dir.get()
+        if output_dir and os.path.exists(output_dir):
+            # Open folder in Windows Explorer
+            subprocess.run(['explorer', output_dir])
+        else:
+            messagebox.showerror("错误", "输出文件夹不存在或未选择！")
+            self.status_label.config(text="错误：输出文件夹不存在或未选择")
 
 def main():
-    # 选择输入文件
-    print("请选择要处理的 Excel 文件...")
-    input_file = select_input_file()
-    if not input_file:
-        print("未选择文件，程序退出")
-        return
-    
-    # 选择输出目录
-    print("请选择输出文件夹...")    
-    output_dir = os.path.join(select_output_directory(), "OutFiles")
-    if not output_dir:
-        print("未选择输出文件夹，程序退出")
-        return
-    
-    # 处理文件
-    create_grade_class_folders(input_file, output_dir)
+    root = tk.Tk()
+    app = ExcelSplitterApp(root)
+    root.mainloop()
 
 if __name__ == "__main__":
     main()
